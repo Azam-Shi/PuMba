@@ -3,7 +3,7 @@ channels:
   - defaults
 dependencies:
   - python=3.10.13
-  - opencv=4.10.0           # from conda (faster, fewer build hassles)
+  - opencv=4.10.0  
   - pip=25.0
   - pip:
       - numpy==1.26.2
