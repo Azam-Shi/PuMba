@@ -3,7 +3,7 @@
 
 
 **Pretrained Model**  
-The pretrained model is provided in the [savedModels] (https://github.com/Azam-Shi/PuMba/tree/main/savedModels) directory.  
+The pretrained model is provided in the [savedModels] [(Stebliankin et al., 2023)](https://github.com/Azam-Shi/PuMba/tree/main/savedModels) directory.  
 
 **Training and Validation Data**  
 Lists of training and validation sets are available in the `data` directory.  
