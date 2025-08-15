@@ -1,5 +1,2 @@
-<p align="left">
-  **ViM-PIsToN** is an improved version of [**PIsToN** (Stebliankin et al., 2023)](https://doi.org/10.1093/bioinformatics/btad123), replacing the **Vision Transformer (ViT)** backbone with   **Vision Mamba (ViM)** to enhance predictive accuracy while maintaining the strong explainability of the original framework.
-</p>
 
-**ViM-PIsToN** is an improved version of [**PIsToN** (Stebliankin et al., 2023)](https://doi.org/10.1093/bioinformatics/btad123), replacing the **Vision Transformer (ViT)** backbone with **Vision Mamba (ViM)** to enhance predictive accuracy while maintaining the strong explainability of the original framework.
+**PuMba** (**P**rotein-protein interface eval**u**ation with Vision **M**am**ba**) is a scoring function for protein-protein docking models to distinguish between native-like and non-native conformations. It is an improvement of [**PIsToN** (Stebliankin et al., 2023)]([https://doi.org/10.1093/bioinformatics/btad123](https://www.nature.com/articles/s42256-023-00715-4)), by replacing the Vision Transformer backbone of PIsToN with Vision Mamba.
