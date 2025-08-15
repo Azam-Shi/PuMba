@@ -1,1 +1,1 @@
-ViM-PIsToN is an improved version of PIsToN (Stebliankin et al., 2023), replacing the Vision Transformer backbone with Vision Mamba to enhance predictive accuracy while maintaining the strong explainability of the original framework.
+**ViM-PIsToN** is an improved version of [**PIsToN** (Stebliankin et al., 2023)](https://doi.org/10.1093/bioinformatics/btad123), replacing the **Vision Transformer (ViT)** backbone with **Vision Mamba (ViM)** to enhance predictive accuracy while maintaining the strong explainability of the original framework.
