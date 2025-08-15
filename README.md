@@ -3,13 +3,13 @@
 
 
 **Pretrained Model**  
-The pretrained model is provided in the [savedModels] [savedModels](https://github.com/Azam-Shi/PuMba/tree/main/savedModels) directory.  
+The pretrained model is provided in the [savedModels](https://github.com/Azam-Shi/PuMba/tree/main/savedModels) directory.  
 
 **Training and Validation Data**  
-Lists of training and validation sets are available in the `data` directory.  
+Lists of training and validation sets are available in the [data](https://github.com/Azam-Shi/PuMba/tree/main/data) directory.  
 
 **Preprocessing Scripts**  
-Scripts for preprocessing input data can be found at [link-to-preprocessing-scripts].  
+Scripts for preprocessing input data can be found at [data_prepare](https://github.com/Azam-Shi/PuMba/tree/main/data_prepare) [link-to-preprocessing-scripts].  
 
 **Training Example**  
-An example training script is provided at [link-to-training-example].  
+An example training script is provided at [training_example](https://github.com/Azam-Shi/PuMba/tree/main/training_example).  
