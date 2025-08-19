@@ -7,7 +7,7 @@
 
 import sys
 import os
-sys.path.append('/aul/homes/ashir018/PUMBA')
+sys.path.append('./PUMBA')
 import numpy as np
 import torch
 # torch.cuda.set_device(1)
@@ -29,18 +29,18 @@ utils_path = './utils'
 sys.path.append(utils_path)
 
 DATA_DIR = os.getcwd() + '/data_preparation/'  # path to the preprocessed input data
-TRAIN_LIST_FILE = './data/lists/training-list.txt'
-VAL_LIST_FILE = './data/lists/val_list.txt'
-MODEL_NAME = f'ViM_PuMba'
+TRAIN_LIST_FILE = './data/training_list.txt'
+VAL_LIST_FILE = './data/val_list.txt'
+MODEL_NAME = f'PuMba'
 MODEL_DIR = f'./savedModels/{MODEL_NAME}'
 IMG_SIZE = 32
 MARGIN = 0
 TEMP = 0.5
 DIM = 16
-PATIENCE = 2
+PATIENCE = 10
 SEED_ID = 7272
 BATCH_SIZE = 1
-MAX_EPOCH = 50
+MAX_EPOCH = 200
 FEATURES_SUBSET = list(range(13))
 N_FEATURES = len(FEATURES_SUBSET)
 
@@ -48,11 +48,9 @@ N_FEATURES = len(FEATURES_SUBSET)
 config = {}
 config['dirs'] = {}
 config['dirs']['data_prepare'] = DATA_DIR
-print(DATA_DIR)
 config['dirs']['grid'] = config['dirs']['data_prepare'] + '07-grid/'
-print( "07-grid location is:", config['dirs']['grid'])
 config['dirs']['docked'] = config['dirs']['data_prepare'] + 'docked/'
-config['dirs']['tmp'] = '/aul/homes/ashir018/PUMBA/tmp'
+config['dirs']['tmp'] = './PUMBA/tmp'
 
 config['ppi_const'] = {}
 config['ppi_const']['patch_r'] = 16 # 16
@@ -69,7 +67,7 @@ def initialize_config():
         'data_prepare': DATA_DIR,
         'grid': DATA_DIR + '07-grid/',
         'docked': DATA_DIR + 'docked/',
-        'tmp': '/aul/homes/ashir018/PUMBA/tmp',
+        'tmp': './PUMBA/tmp',
     }
     config['ppi_const'] = {'patch_r': 16}
     os.environ["TMP"] = config['dirs']['tmp']
@@ -118,14 +116,10 @@ def compute_mean_std(train_list, config):
         for feature_i in feature_pairs[feature]:
             mean_array[feature_i] = mean_value
             std_array[feature_i] = std_value
-
-    print(f"Mean values: {mean_array}")
-    print(f"Std values: {std_array}")
     return mean_array, std_array
 
 
 def read_energies(energies_path, assign_zeros=False):
-    
     """
     :param ppi:
     :return: numpy array of energy terms:
@@ -148,7 +142,6 @@ def read_energies(energies_path, assign_zeros=False):
     11 - (16) - catpiS	  - cation-pi interactions
     12 - (17) - aliph	  - aliphatic interactions
          (18) - prob      - rotamer probability
-
     """    
     to_read=False
     all_energies = None
@@ -158,22 +151,17 @@ def read_energies(energies_path, assign_zeros=False):
         i = 0
         while i < len(lines):
             line = lines[i]
-
             if to_read:
                 if line.strip() == '':
-                    print(f"Empty line found in {energies_path}. Assigning zeros.")
                     all_energies = np.zeros(13)
                     break
-
                 if line.startswith('rob |'):
                     i += 1  # Skip to the next line after 'rob |'
                     if i < len(lines):
                         line = lines[i]
                     else:
-                        # print(f"No line found after 'rob |' in {energies_path}. Assigning zeros.")
                         all_energies = np.zeros(13)
                         break
-
                 all_energies = line.split('|')
                 all_energies = [x.strip() for x in all_energies]
                 all_energies = all_energies[5:18]
@@ -192,13 +180,10 @@ def read_energies(energies_path, assign_zeros=False):
 
 
 class PuMba_proto(nn.Module):
-
     def __init__(self, config, img_size=32, num_classes=2, zero_head=False, margin=0, temperature=0.1):
         super(PuMba_proto, self).__init__()
-
         """
         Input: Image with the following features:
-
         0 - Shape index | p1
         1 - Distance depended curvature | p1
         2 - Hydrogen bond potential | p1
@@ -240,8 +225,6 @@ class PuMba_proto(nn.Module):
         self.img_size = img_size
         self.num_classes = num_classes
         self.zero_head = zero_head
-
-
         self.spatial_transformers_list = nn.ModuleList()
 
         for feature in self.index_dict.keys():
@@ -250,13 +233,11 @@ class PuMba_proto(nn.Module):
 
         self.classifier = config.classifier  
         self.feature_transformer = Encoder(config)
-
         self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size), requires_grad=True)
         self.proto_vector_pos = nn.Parameter(torch.rand(1,config.hidden_size), requires_grad=True)
         self.proto_vector_neg = nn.Parameter(torch.rand(1,config.hidden_size), requires_grad=True)
         self.margin = margin
         self.temperature = temperature
-
 
     def init_vim(self, config, channels, n_individual):
         """
@@ -306,7 +287,6 @@ class PuMba_proto(nn.Module):
             BCE_loss = bce_loss_fn(logits, labels) 
             supCon_loss = SupConLoss_fn(x, labels)
             loss = proto_loss + BCE_loss + supCon_loss
-
             return scores, all_spatial_attn, loss
         else:
             return scores, all_spatial_attn
@@ -358,27 +338,30 @@ def main():
     all_energies_list = []
     for ppi in train_list_updated:
         energy_path = f"{config['dirs']['grid']}/refined-out-{ppi}.ref"
-        # print(energy_path)
         if not os.path.exists(energy_path):
             print(f"Energy file {energy_path} does not exist, skipping...")
         if os.path.exists(energy_path):
             energy_i = read_energies(energy_path)
             if energy_i is not None:
                 all_energies_list.append(energy_i)
-            if energy_i is None:
-                print(f"Energy file {energy_path} is empty, assigning zeros...")
 
     print(f"Loaded energy terms from {len(all_energies_list)} native complexes")
 
     all_energies = np.stack(all_energies_list, axis=0)
     all_energies_mean = np.mean(all_energies, axis=0)
     all_energies_std = np.std(all_energies, axis=0)
-    print(f"Energies mean: {list(all_energies_mean)}")
-    print(f"Energies std: {list(all_energies_std)}")
 
-    params = {'dim_head': DIM, 'hidden_size': DIM, 'dropout': 0, 'attn_dropout': 0, 'lr': 0.0001,
-              'n_heads': 8, 'neg_pos_ratio': 5, 'patch_size': 4, 'transformer_depth': 8,
-              'weight_decay': 0.0001, 'margin': MARGIN, 'temperature': TEMP}
+    params = {
+        'hidden_size': DIM,
+        'dropout': 0,
+        'depth': 8,
+        'lr': 1e-4,
+        'neg_pos_ratio': 5,
+        'patch_size': 4,
+        'weight_decay': 1e-4,
+        'margin': MARGIN,
+        'temperature': TEMP
+    }
 
     os.makedirs(MODEL_DIR, exist_ok=True)
 
