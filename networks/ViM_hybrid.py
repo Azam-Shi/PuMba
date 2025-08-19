@@ -15,7 +15,6 @@ from timm.models.vision_transformer import _load_weights
 import math
 from collections import namedtuple
 from utils.mamba_simple import Mamba
-from mamba_ssm.utils.generation import GenerationMixin
 from mamba_ssm.utils.hf import load_config_hf, load_state_dict_hf
 from utils.rope import *
 import random
