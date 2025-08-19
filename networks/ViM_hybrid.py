@@ -2,19 +2,19 @@
 # Reference:
 # https://github.com/hustvl/Vim/blob/main/vim/models_mamba.py
 """
+
 import torch
 import torch.nn as nn
 from functools import partial
 from torch import Tensor
 from typing import Optional
-from timm.models.vision_transformer import VisionTransformer, _cfg
-from timm.models.registry import register_model
 from timm.models.layers import trunc_normal_, lecun_normal_
 from timm.models.layers import DropPath, to_2tuple
-from timm.models.vision_transformer import _load_weights
 import math
+import ml_collections
 from collections import namedtuple
 from utils.mamba_simple import Mamba
+from mamba_ssm.utils.generation import GenerationMixin
 from mamba_ssm.utils.hf import load_config_hf, load_state_dict_hf
 from utils.rope import *
 import random
@@ -25,20 +25,32 @@ except ImportError:
     RMSNorm, layer_norm_fn, rms_norm_fn = None, None, None
 
 
-import ml_collections
 def get_ml_config(params):
     """Returns the ViT configuration."""
     config = ml_collections.ConfigDict()
     config.patches = ml_collections.ConfigDict({'size': (params['patch_size'], params['patch_size'])})
+
     config.hidden_size = params['hidden_size']
-    config.transformer = ml_collections.ConfigDict()
-    config.transformer.mlp_dim = params['dim_head']
-    config.transformer.num_heads = params['n_heads']
-    config.transformer.num_layers = params['transformer_depth']
-    config.transformer.attention_dropout_rate = params['attn_dropout']
-    config.transformer.dropout_rate = params['dropout']
+    config.depth = params['depth']
     config.classifier = 'token'
     config.representation_size = None
+    # Additional model params
+    config.update({
+        'drop_path_rate': 0.1,
+        'rms_norm': True,
+        'norm_epsilon': 1e-5,
+        'fused_add_norm': True,
+        'residual_in_fp32': True,
+        'if_cls_token': True,
+        'stride': 4,
+        'if_bidirectional': True,
+        'if_abs_pos_embed': True,
+        'if_rope': False,
+        'if_rope_residual': False,
+        'flip_img_sequences_ratio': -1.0,
+        'use_double_cls_token': False,
+        'use_middle_cls_token': True
+    })
     return config
 
 class PatchEmbed(nn.Module):
@@ -307,80 +319,42 @@ def segm_init_weights(m):
         nn.init.constant_(m.bias, 0)
         nn.init.constant_(m.weight, 1.0)
 
-class VisionMamba(nn.Module):
-    def __init__(self,
-                 config=None,
-                 img_size=32, 
-                 patch_size=4, 
-                 stride=4,
-                 depth=8, 
-                 embed_dim=16,
-                 d_state=8, 
-                 channels=13, 
-                 num_classes=2,
-                 ssm_cfg=None, 
-                 drop_rate=0.,
-                 drop_path_rate=0.1,
-                 norm_epsilon: float = 1e-5, 
-                 rms_norm: bool = True, 
-                 initializer_cfg=None,
-                 fused_add_norm=True,
-                 residual_in_fp32=True,
-                 device=None,
-                 dtype=None,
-                 ft_seq_len=None,
-                 pt_hw_seq_len=14,
-                 if_bidirectional=True,
-                 final_pool_type='none',
-                 if_abs_pos_embed=True,
-                 if_rope=False,
-                 if_rope_residual=False,
-                 flip_img_sequences_ratio=-1.,
-                 if_bimamba=False,
-                 bimamba_type="v2",
-                 if_cls_token=True,
-                 if_divide_out=True,
-                 init_layer_scale=None,
-                 use_double_cls_token=False,
-                 use_middle_cls_token=True,
-                 **kwargs):
-        self.config = config
-        factory_kwargs = {"device": device, "dtype": dtype}
-        kwargs.update(factory_kwargs) 
-        super().__init__()
-        self.residual_in_fp32 = residual_in_fp32
-        self.fused_add_norm = fused_add_norm
-        self.if_bidirectional = if_bidirectional
-        self.final_pool_type = final_pool_type
-        self.if_abs_pos_embed = if_abs_pos_embed
-        self.if_rope = if_rope
-        self.if_rope_residual = if_rope_residual
-        self.flip_img_sequences_ratio = flip_img_sequences_ratio
-        self.if_cls_token = if_cls_token
-        self.use_double_cls_token = use_double_cls_token
-        self.use_middle_cls_token = use_middle_cls_token
-        self.num_tokens = 1 if if_cls_token else 0
 
-        # pretrain parameters
-        self.num_classes = num_classes
-        self.d_model = self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
+class VisionMamba(nn.Module):
+    def __init__(self, config, img_size=32, patch_size=4, stride=4, embed_dim=16, depth=8, d_state=8, rms_norm=True, initializer_cfg=None, fused_add_norm=True, residual_in_fp32=True, norm_epsilon=1e-5,
+                 use_double_cls_token=False, use_middle_cls_token=True, channels=13, num_classes=2, drop_path_rate=0.1):
+        super().__init__()
+        self.if_bidirectional = config.get("if_bidirectional", True)
+        self.if_abs_pos_embed = config.get("if_abs_pos_embed", True)
+        self.if_rope = config.get("if_rope", False)
+        self.if_rope_residual = config.get("if_rope_residual", False)
+        self.flip_img_sequences_ratio = config.get("flip_img_sequences_ratio", -1.0)
+        self.if_cls_token = config.get("if_cls_token", True)
+        self.use_double_cls_token = config.get("use_double_cls_token", False)
+        self.use_middle_cls_token = config.get("use_middle_cls_token", True)
+        self.embed_dim = embed_dim
+        self.num_features = self.embed_dim
+        self.fused_add_norm = fused_add_norm
+        self.residual_in_fp32 = residual_in_fp32
+        self.num_tokens = 2 if self.use_double_cls_token else (1 if self.if_cls_token else 0)
+ 
         self.patch_embed = PatchEmbed(
             img_size=img_size, patch_size=patch_size, stride=stride, in_chans=channels, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
-        if if_cls_token:
-            if use_double_cls_token:
+        if self.if_cls_token:
+            if self.use_double_cls_token:
                 self.cls_token_head = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
                 self.cls_token_tail = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
                 self.num_tokens = 2
             else:
                 self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
                 
-        if if_abs_pos_embed:
+        if self.if_abs_pos_embed:
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, self.embed_dim))
-            self.pos_drop = nn.Dropout(p=drop_rate)
+            self.pos_drop = nn.Dropout(p=config.get("drop_rate", 0.0))
 
-        if if_rope:
+        if self.if_rope:
             half_head_dim = embed_dim // 2
             hw_seq_len = img_size // patch_size
             self.rope = VisionRotaryEmbeddingFast(
@@ -400,32 +374,30 @@ class VisionMamba(nn.Module):
                 create_block(
                     embed_dim,
                     d_state=d_state,
-                    ssm_cfg=ssm_cfg,
-                    norm_epsilon=norm_epsilon,
-                    rms_norm=rms_norm,
-                    residual_in_fp32=residual_in_fp32,
-                    fused_add_norm=fused_add_norm,
+                    ssm_cfg=None,
+                    norm_epsilon=1e-5,
+                    rms_norm=True,
+                    residual_in_fp32=True,
+                    fused_add_norm=True,
                     layer_idx=i,
-                    if_bimamba=if_bimamba,
-                    bimamba_type=bimamba_type,
+                    if_bimamba=False,
+                    bimamba_type="v2",
                     drop_path=inter_dpr[i],
-                    if_divide_out=if_divide_out,
-                    init_layer_scale=init_layer_scale,
-                    **factory_kwargs,
+                    if_divide_out=True,
+                    init_layer_scale=None,
                 )
                 for i in range(depth)
             ]
         )
 
         self.norm_f = (nn.LayerNorm if not rms_norm else RMSNorm)(
-            embed_dim, eps=norm_epsilon, **factory_kwargs
-        )
+            embed_dim, eps=norm_epsilon)
 
         self.patch_embed.apply(segm_init_weights)
         self.head.apply(segm_init_weights)
-        if if_abs_pos_embed:
+        if self.if_abs_pos_embed:
             trunc_normal_(self.pos_embed, std=.02)
-        if if_cls_token:
+        if self.if_cls_token:
             if use_double_cls_token:
                 trunc_normal_(self.cls_token_head, std=.02)
                 trunc_normal_(self.cls_token_tail, std=.02)
@@ -538,55 +510,33 @@ class VisionMamba(nn.Module):
         features = self.forward_features(x, inference_params)
         return features
     
-    
+
+def vision_mamba(config: ml_collections.ConfigDict, channels: int, num_classes: int = 2) -> VisionMamba:
+    return VisionMamba(
+        config=config,
+        img_size=config.get("img_size", 32),
+        patch_size=config.patches.size[0],
+        stride=config.get("stride", 4),
+        embed_dim=config.hidden_size,
+        depth=config.depth,
+        d_state=config.get("d_state", 8),
+        channels=channels,
+        num_classes=num_classes,
+        drop_path_rate=config.get("drop_path_rate", 0.1)
+    ) 
 class ViM_Hybrid_encoder(nn.Module):
-    def __init__(self, config, n_individual, img_size=32, num_classes=2, zero_head=False, vis=False, channels=13):
-        super(ViM_Hybrid_encoder, self).__init__()
+    def __init__(self, config: ml_collections.ConfigDict, n_individual: int, img_size: int = 32,
+                 num_classes: int = 2, zero_head: bool = False, vis: bool = False, channels: int = 13):
+        super().__init__()
         self.num_classes = num_classes
         self.zero_head = zero_head
         self.classifier = config.classifier
 
-        self.forward_features = VisionMamba(
-            config=config, 
-            img_size=img_size,  
-            patch_size=4,
-            stride=4,
-            depth=8,
-            embed_dim=config.hidden_size,
-            d_state=8,
-            channels=channels,
-            num_classes=2, 
-            ssm_cfg=None,
-            drop_rate=0.,
-            drop_path_rate=0.1,
-            norm_epsilon = 1e-5, 
-            rms_norm = True, 
-            initializer_cfg=None,
-            fused_add_norm=True,
-            residual_in_fp32=True,
-            device=None,
-            dtype=None,
-            ft_seq_len=None,
-            pt_hw_seq_len=14,
-            if_bidirectional=True,
-            final_pool_type='none',
-            if_abs_pos_embed=True,
-            if_rope=False,
-            if_rope_residual=False,
-            flip_img_sequences_ratio=-1.,
-            if_bimamba=False,
-            bimamba_type="v2",
-            if_cls_token=True,
-            if_divide_out=True,
-            init_layer_scale=None,
-            use_double_cls_token=False,
-            use_middle_cls_token=True,
-        )
+        self.forward_features = vision_mamba(config, channels, num_classes)
         self.individual_nn = nn.Linear(n_individual, n_individual)
         self.combine_nn = nn.Linear(config.hidden_size + n_individual, config.hidden_size)
         self.af_ind = nn.GELU()
         self.af_combine = nn.GELU()
-
 
     def forward(self, x, individual_feat, return_features=False, inference_params=None):
         x = self.forward_features(x, inference_params=inference_params)        
@@ -596,4 +546,3 @@ class ViM_Hybrid_encoder(nn.Module):
         x = self.combine_nn(x)  
         x = self.af_combine(x)  
         return x, None
-
