@@ -9,7 +9,7 @@ The pretrained model is provided in the [savedModels](https://github.com/Azam-Sh
 Lists of training and validation sets are available in the [data](https://github.com/Azam-Shi/PuMba/tree/main/data) directory.  
 
 **Preprocessing Scripts**  
-Scripts for preprocessing input data can be found at [data_prepare](https://github.com/Azam-Shi/PuMba/tree/main/data_prepare) [link-to-preprocessing-scripts].  
+Scripts for preprocessing input data can be found at [data_prepare](https://github.com/Azam-Shi/PuMba/tree/main/data_prepare) directory.  
 
 **Training Example**  
 An example training script is provided at [PuMba_training.py](https://github.com/Azam-Shi/PuMba/blob/main/PuMba_training.py).  
